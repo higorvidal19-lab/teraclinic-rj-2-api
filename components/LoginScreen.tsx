@@ -11,14 +11,14 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin, onSwitchToPatientLog
   const [password, setPassword] = useState('password123');
   const [error, setError] = useState('');
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setError('');
-    const success = onLogin(email, password);
-    if (!success) {
-      setError('Credenciais inválidas. Tente novamente.');
-    }
-  };
+ const handleSubmit = async (e: React.FormEvent) => {
+  e.preventDefault();
+  setError('');
+  const success = await onLogin(email, password);
+  if (!success) {
+    setError('Credenciais inválidas. Tente novamente.');
+  }
+};
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-gray-100">
