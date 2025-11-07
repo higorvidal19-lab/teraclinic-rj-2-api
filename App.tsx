@@ -7,6 +7,9 @@ import PatientLoginScreen from './components/PatientLoginScreen';
 import Dashboard from './components/Dashboard';
 import PatientPortal from './components/PatientPortal';
 
+// 🔹 Importa o authService centralizado
+import { signInUser, signOutUser, getCurrentUser } from './services/authService';
+
 // Tipagem de views (telas)
 type View =
   | { name: 'login' }
@@ -15,7 +18,7 @@ type View =
   | { name: 'dashboard' }
   | { name: 'patientPortal'; patient: Patient };
 
-// Contexto global para configurações da clínica
+// Contexto global da clínica
 interface ClinicContextType {
   settings: ClinicSettings;
   setSettings: React.Dispatch<React.SetStateAction<ClinicSettings>>;
@@ -40,29 +43,22 @@ const App: React.FC = () => {
     adminQuota: 1,
   });
 
-  // 🔹 LOGIN REAL COM SUPABASE
+  // 🔹 LOGIN REAL COM SUPABASE (via authService)
   const handleLogin = useCallback(async (email: string, pass: string) => {
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password: pass,
-      });
+      console.log('Tentando login:', email);
 
-      if (error) {
-        console.error('Erro ao logar:', error.message);
+      const { user } = await signInUser(email, pass);
+      if (!user) {
+        console.warn('Usuário não encontrado.');
         return false;
       }
 
-      if (!data.user) {
-        console.warn('Usuário não retornado.');
-        return false;
-      }
-
-      // Busca o perfil na tabela "profiles"
+      // 🔸 Busca o perfil correspondente
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('*')
-        .eq('id', data.user.id)
+        .eq('id', user.id)
         .single();
 
       if (profileError) {
@@ -70,30 +66,44 @@ const App: React.FC = () => {
         return false;
       }
 
-      // Define o usuário atual
+      console.log('Perfil carregado:', profile);
+
+      // 🔸 Define o usuário atual com role correta
       setCurrentUser({
-        id: data.user.id,
-        email: data.user.email ?? '',
+        id: user.id,
+        email: user.email ?? '',
         name: profile?.nome ?? 'Usuário',
         role: profile?.role ?? 'user',
       });
 
+      // Se for MASTER, libera todas as funções do dashboard
+      if (profile?.role === 'master' || profile?.role === 'MASTER') {
+        console.log('Usuário MASTER logado ✅');
+      } else {
+        console.warn('Usuário comum logado, acesso limitado.');
+      }
+
       setView({ name: 'dashboard' });
       return true;
-    } catch (err) {
-      console.error('Erro inesperado no login:', err);
+    } catch (err: any) {
+      console.error('Erro ao logar:', err.message);
       return false;
     }
   }, []);
 
-  // 🔹 SIGNUP MOCK (a tela real de cadastro já faz o signup via Supabase)
-  const handleSignUp = useCallback(() => {
-    setView({ name: 'login' });
+  // 🔹 LOGOUT REAL
+  const handleLogout = useCallback(async () => {
+    try {
+      await signOutUser();
+      setCurrentUser(null);
+      setView({ name: 'login' });
+    } catch (err: any) {
+      console.error('Erro ao deslogar:', err.message);
+    }
   }, []);
 
-  // 🔹 LOGIN DE PACIENTE (mockado por enquanto)
+  // 🔹 LOGIN DE PACIENTE (mockado)
   const handlePatientLogin = useCallback((cpf: string, dob: string) => {
-    // Exemplo simples: valida login local (pode ser ligado ao Supabase depois)
     if (cpf === '00000000000' && dob === '2000-01-01') {
       setView({
         name: 'patientPortal',
@@ -104,44 +114,35 @@ const App: React.FC = () => {
     return false;
   }, []);
 
-  const handleLogout = useCallback(() => {
-    setCurrentUser(null);
+  // 🔹 SIGNUP MOCK (a tela real de cadastro já faz o signup via Supabase)
+  const handleSignUp = useCallback(() => {
     setView({ name: 'login' });
   }, []);
 
-  // 🔹 Mantém o usuário logado após recarregar a página
+  // 🔹 Mantém o usuário logado após recarregar
   useEffect(() => {
-    supabase.auth.getSession().then(({ data }) => {
-      if (data.session?.user) {
-        const user = data.session.user;
-        setCurrentUser({
-          id: user.id,
-          email: user.email ?? '',
-          name: user.user_metadata?.nome ?? 'Usuário',
-          role: user.user_metadata?.role ?? 'user',
-        });
-        setView({ name: 'dashboard' });
-      }
-    });
+    (async () => {
+      try {
+        const user = await getCurrentUser();
+        if (user) {
+          const { data: profile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', user.id)
+            .single();
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (session?.user) {
-        setCurrentUser({
-          id: session.user.id,
-          email: session.user.email ?? '',
-          name: session.user.user_metadata?.nome ?? 'Usuário',
-          role: session.user.user_metadata?.role ?? 'user',
-        });
-        setView({ name: 'dashboard' });
-      } else {
-        setCurrentUser(null);
-        setView({ name: 'login' });
+          setCurrentUser({
+            id: user.id,
+            email: user.email ?? '',
+            name: profile?.nome ?? 'Usuário',
+            role: profile?.role ?? 'user',
+          });
+          setView({ name: 'dashboard' });
+        }
+      } catch (err) {
+        console.error('Erro ao restaurar sessão:', err);
       }
-    });
-
-    return () => {
-      listener.subscription.unsubscribe();
-    };
+    })();
   }, []);
 
   // 🔹 Renderização condicional das telas
